@@ -47,6 +47,7 @@ fn remote_control(payload: String) {
 pub fn run() {
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![remote_control])
+    .plugin(tauri_plugin_clipboard_manager::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

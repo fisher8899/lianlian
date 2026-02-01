@@ -111,36 +111,58 @@ const createPeerConnection = () => {
   return pc
 }
 
+import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager'
+
 const setupDataChannel = (channel: RTCDataChannel) => {
   dataChannel = channel
   channel.onopen = () => {
     log('数据通道打开')
-    // 如果是被控端，发送分辨率
     if (localStream.value) {
       const track = localStream.value.getVideoTracks()[0]
       const s = track.getSettings()
       sendControlMeta(s.width || 1920, s.height || 1080)
     }
+
+    // 启动剪贴板同步
+    startClipboardSync()
   }
   
   channel.onmessage = async (e) => {
     try {
       const msg = JSON.parse(e.data)
       if (msg.type === 'control') {
-        // 调用 Rust 执行控制
-        // 注意：这里需要根据分辨率映射坐标，但为了简化，直接透传
-        // 假设 Rust 端处理绝对坐标
         await invoke('remote_control', { payload: JSON.stringify(msg.data) })
       } else if (msg.type === 'meta') {
         remoteScreenSize.value = { width: msg.width, height: msg.height }
         log(`对方屏幕分辨率: ${msg.width}x${msg.height}`)
+      } else if (msg.type === 'clipboard') {
+        try {
+          await writeText(msg.data)
+          log('已同步剪贴板内容')
+        } catch (err) {
+          log('写入剪贴板失败: ' + err)
+        }
       } else {
         log(`收到消息: ${e.data}`)
       }
-    } catch (err) {
-      // log(`非JSON消息: ${e.data}`)
-    }
+    } catch (err) { }
   }
+}
+
+let lastClipboard = ''
+const startClipboardSync = () => {
+  setInterval(async () => {
+    if (isConnected.value) {
+      try {
+        const text = await readText()
+        if (text && text !== lastClipboard) {
+          lastClipboard = text
+          dataChannel?.send(JSON.stringify({ type: 'clipboard', data: text }))
+          // log('剪贴板已发送') // 防止刷屏
+        }
+      } catch (e) {}
+    }
+  }, 1000)
 }
 
 const sendControlMeta = (w: number, h: number) => {
