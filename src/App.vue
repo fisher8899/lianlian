@@ -16,6 +16,10 @@ const isSharing = ref(false)
 const remoteVideo = ref<HTMLVideoElement | null>(null)
 const remoteScreenSize = ref({ width: 1920, height: 1080 }) // 默认，实际应交换
 
+// 服务器配置
+const serverUrl = ref(localStorage.getItem('lianlian_server') || 'ws://192.168.1.104:9001')
+const showSettings = ref(false)
+
 let socket: WebSocket | null = null
 let peerConnection: RTCPeerConnection | null = null
 let dataChannel: RTCDataChannel | null = null
@@ -24,6 +28,13 @@ const log = (msg: string) => {
   logs.value.unshift(`[${new Date().toLocaleTimeString()}] ${msg}`)
   if (logs.value.length > 50) logs.value.pop()
   console.log(msg)
+}
+
+const saveSettings = () => {
+  if (!serverUrl.value) return
+  localStorage.setItem('lianlian_server', serverUrl.value)
+  showSettings.value = false
+  initSignal()
 }
 
 // 1. 获取屏幕流 (被控端)
@@ -37,13 +48,14 @@ const startScreenShare = async () => {
     isSharing.value = true
     
     // 获取屏幕分辨率并保存，以便发送给主控端
-    const track = stream.getVideoTracks()[0]
-    const settings = track.getSettings()
-    log(`屏幕分辨率: ${settings.width}x${settings.height}`)
+    // 关键修正: 使用 window.screen (逻辑分辨率) 而非视频流分辨率，以适配 Mac Retina 屏幕
+    const screenW = window.screen.width
+    const screenH = window.screen.height
+    log(`发送屏幕逻辑分辨率: ${screenW}x${screenH}`)
     
     // 发送分辨率给对方 (如果已连接)
     if (dataChannel?.readyState === 'open') {
-      sendControlMeta(settings.width || 1920, settings.height || 1080)
+      sendControlMeta(screenW, screenH)
     }
 
     track.onended = () => {
@@ -57,9 +69,22 @@ const startScreenShare = async () => {
 
 // 2. 初始化信令
 const initSignal = () => {
-  socket = new WebSocket('ws://localhost:9001')
+  if (socket) {
+    socket.close()
+    socket = null
+  }
+  
+  log(`正在连接: ${serverUrl.value}`)
+  try {
+    socket = new WebSocket(serverUrl.value)
+  } catch (e) {
+    log(`连接失败: ${e}`)
+    return
+  }
+
   socket.onopen = () => { isConnecting.value = false; log('信令已连接') }
   socket.onclose = () => { myId.value = '离线' }
+  socket.onerror = (e) => { log('信令连接错误') }
   socket.onmessage = async (event) => {
     const data = JSON.parse(event.data)
     if (data.from && !remoteId.value) remoteId.value = data.from
@@ -118,9 +143,9 @@ const setupDataChannel = (channel: RTCDataChannel) => {
   channel.onopen = () => {
     log('数据通道打开')
     if (localStream.value) {
-      const track = localStream.value.getVideoTracks()[0]
-      const s = track.getSettings()
-      sendControlMeta(s.width || 1920, s.height || 1080)
+      const screenW = window.screen.width
+      const screenH = window.screen.height
+      sendControlMeta(screenW, screenH)
     }
 
     // 启动剪贴板同步
@@ -255,9 +280,26 @@ onMounted(() => {
 <template>
   <div class="app-container">
     <header v-if="!remoteStream">
-      <h1>连连 (LianLian)</h1>
+      <div class="header-left">
+        <h1>连连 (LianLian)</h1>
+        <button @click="showSettings = !showSettings" class="settings-btn">⚙️</button>
+      </div>
       <span class="badge" :class="{ online: myId !== '离线' }">{{ myId }}</span>
     </header>
+
+    <!-- 设置面板 -->
+    <div class="settings-panel" v-if="showSettings">
+      <div class="settings-content">
+        <h3>服务器设置</h3>
+        <p class="server-info">主服务器 (Mac) 地址: <strong>ws://192.168.1.104:9001</strong></p>
+        <input v-model="serverUrl" placeholder="例如 ws://192.168.1.104:9001" />
+        <div class="settings-actions">
+          <button @click="saveSettings">保存并重连</button>
+          <button @click="showSettings = false" class="cancel">关闭</button>
+        </div>
+        <p class="hint">注意：Windows 端必须配置为上述 Mac 地址才能互通</p>
+      </div>
+    </div>
 
     <main>
       <!-- 全屏远程控制 -->
@@ -313,4 +355,22 @@ video { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: 
 .share-btn, .connect-btn { width: 100%; padding: 10px; margin-top: 10px; cursor: pointer; }
 .share-btn.active { background: #27ae60; color: white; }
 .logs-panel { margin-top: 20px; height: 100px; overflow-y: auto; background: #333; color: #ccc; font-size: 12px; padding: 10px; }
+
+/* Settings */
+.header-left { display: flex; align-items: center; gap: 10px; }
+.settings-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; padding: 0; }
+.settings-panel {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); z-index: 200;
+  display: flex; justify-content: center; align-items: center;
+}
+.settings-content {
+  background: white; padding: 20px; border-radius: 8px; width: 340px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.server-info { font-size: 0.9rem; color: #2c3e50; margin-bottom: 10px; background: #e8f6f3; padding: 8px; border-radius: 4px; border-left: 4px solid #1abc9c; }
+.settings-actions { display: flex; gap: 10px; margin-top: 15px; }
+.settings-actions button { flex: 1; margin: 0; }
+.cancel { background: #95a5a6; }
+.hint { font-size: 0.8rem; color: #7f8c8d; margin-top: 10px; text-align: center; }
 </style>
