@@ -40,8 +40,9 @@ const saveSettings = () => {
 // 1. 获取屏幕流 (被控端)
 const startScreenShare = async () => {
   try {
+    // 修复 TS 错误：显式转换类型
     const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: "always", frameRate: 30 },
+      video: { cursor: "always", frameRate: 30 } as any,
       audio: false
     })
     localStream.value = stream
@@ -58,12 +59,13 @@ const startScreenShare = async () => {
       sendControlMeta(screenW, screenH)
     }
 
-    track.onended = () => {
+    const videoTrack = stream.getVideoTracks()[0]
+    videoTrack.onended = () => {
       isSharing.value = false
       localStream.value = null
     }
-  } catch (e) {
-    log(`获取屏幕失败: ${e}`)
+  } catch (error) { // 修复未使用变量 e
+    log(`获取屏幕失败: ${error}`)
   }
 }
 
@@ -112,7 +114,7 @@ const createPeerConnection = () => {
     if (event.streams && event.streams[0]) {
       remoteStream.value = event.streams[0]
       setTimeout(() => {
-        if (remoteVideo.value) remoteVideo.value.srcObject = event.streams[0]
+        if (remoteVideo.value) remoteVideo.value.srcObject = event.streams[0] as any
       }, 100)
     }
   }
