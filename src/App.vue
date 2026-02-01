@@ -60,11 +60,13 @@ const startScreenShare = async () => {
     }
 
     const videoTrack = stream.getVideoTracks()[0]
-    videoTrack.onended = () => {
-      isSharing.value = false
-      localStream.value = null
+    if (videoTrack) {
+        videoTrack.onended = () => {
+        isSharing.value = false
+        localStream.value = null
+        }
     }
-  } catch (error) { // 修复未使用变量 e
+  } catch (error) {
     log(`获取屏幕失败: ${error}`)
   }
 }
@@ -86,7 +88,7 @@ const initSignal = () => {
 
   socket.onopen = () => { isConnecting.value = false; log('信令已连接') }
   socket.onclose = () => { myId.value = '离线' }
-  socket.onerror = (e) => { log('信令连接错误') }
+  socket.onerror = () => { log('信令连接错误') } // 移除未使用的 e 参数
   socket.onmessage = async (event) => {
     const data = JSON.parse(event.data)
     if (data.from && !remoteId.value) remoteId.value = data.from
@@ -172,7 +174,7 @@ const setupDataChannel = (channel: RTCDataChannel) => {
       } else {
         log(`收到消息: ${e.data}`)
       }
-    } catch (err) { }
+    } catch { } // 移除未使用的 err
   }
 }
 
@@ -187,7 +189,7 @@ const startClipboardSync = () => {
           dataChannel?.send(JSON.stringify({ type: 'clipboard', data: text }))
           // log('剪贴板已发送') // 防止刷屏
         }
-      } catch (e) {}
+      } catch {}
     }
   }, 1000)
 }
